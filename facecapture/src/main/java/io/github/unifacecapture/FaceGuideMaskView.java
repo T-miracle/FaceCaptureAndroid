@@ -6,7 +6,7 @@ import android.graphics.Paint;
 import android.graphics.RectF;
 import android.view.View;
 
-/** Draws the dimmed area around the square guide centered on screen. */
+/** Draws the dimmed area around the square guide, shifted upward by one third of its height. */
 final class FaceGuideMaskView extends View {
     static final float FRAME_WIDTH_FRACTION = 0.90f;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -42,7 +42,7 @@ final class FaceGuideMaskView extends View {
     private void updateFrameRect() {
         float side = getWidth() * FRAME_WIDTH_FRACTION;
         float left = (getWidth() - side) / 2f;
-        float top = Math.max(0f, (getHeight() - side) / 2f);
+        float top = Math.max(0f, (getHeight() - side) / 2f - side / 3f);
         frameRect.set(left, top, left + side, top + side);
     }
 }
