@@ -216,8 +216,8 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
         hintParams.gravity = Gravity.TOP | Gravity.START;
         zoomHint.setLayoutParams(hintParams);
 
-        int desiredShutterTop = Math.round(frame.bottom + dp(64));
-        int shutterTop = Math.min(desiredShutterTop, Math.max(0, root.getHeight() - dp(88)));
+        int bottomClearance = Math.max(dp(12), root.getHeight() / 8);
+        int shutterTop = Math.max(0, root.getHeight() - bottomClearance - dp(76));
         FrameLayout.LayoutParams shutterParams = (FrameLayout.LayoutParams) shutterButton.getLayoutParams();
         shutterParams.setMarginStart(Math.round(frame.centerX() - dp(38)));
         shutterParams.topMargin = shutterTop;
