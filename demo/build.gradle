@@ -1,0 +1,29 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'io.github.unifacecapture.demo'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'io.github.unifacecapture.demo'
+        minSdk 21
+        targetSdk 34
+        versionCode 1
+        versionName '1.0.0'
+    }
+
+    buildFeatures {
+        buildConfig false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+dependencies {
+    implementation project(':facecapture')
+}

@@ -1,0 +1,25 @@
+{
+  "name": "Uni Face Capture",
+  "id": "uni-face-capture",
+  "version": "1.0.0",
+  "description": "Uni-App App-Plus native portrait face capture plugin for Android.",
+  "_dp_type": "nativeplugin",
+  "_dp_nativeplugin": {
+    "android": {
+      "plugins": [
+        {
+          "type": "module",
+          "name": "uni-face-capture",
+          "class": "io.github.unifacecapture.FaceCaptureModule"
+        }
+      ],
+      "integrateType": "aar",
+      "minSdkVersion": 21,
+      "compileOptions": {
+        "sourceCompatibility": "1.8",
+        "targetCompatibility": "1.8"
+      },
+      "abis": ["armeabi-v7a", "arm64-v8a"]
+    }
+  }
+}

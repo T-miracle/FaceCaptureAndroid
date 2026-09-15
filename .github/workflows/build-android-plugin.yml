@@ -1,0 +1,49 @@
+name: Build Android Uni Face Capture Plugin
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'facecapture/**'
+      - 'uniapp-plugin/package.json'
+      - '.github/workflows/build-android-plugin.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-aar:
+    runs-on: ubuntu-latest
+    env:
+      DCLOUD_SDK_REPOSITORY: ${{ vars.DCLOUD_ANDROID_SDK_REPOSITORY }}
+      DCLOUD_SDK_RELEASE_TAG: ${{ vars.DCLOUD_ANDROID_SDK_RELEASE_TAG }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download DCloud Uni-App compile-only AAR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test -n "$DCLOUD_SDK_REPOSITORY" || { echo "::error::Set Actions variable DCLOUD_ANDROID_SDK_REPOSITORY."; exit 1; }
+          test -n "$DCLOUD_SDK_RELEASE_TAG" || { echo "::error::Set Actions variable DCLOUD_ANDROID_SDK_RELEASE_TAG."; exit 1; }
+          mkdir -p facecapture/libs
+          gh release download "$DCLOUD_SDK_RELEASE_TAG" --repo "$DCLOUD_SDK_REPOSITORY" --pattern 'uniapp-v8-release.aar' --dir facecapture/libs
+          test -s facecapture/libs/uniapp-v8-release.aar
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Grant Gradle wrapper execute permission
+        run: chmod +x gradlew
+      - name: Build release AAR
+        run: ./gradlew :facecapture:assembleRelease --no-daemon
+      - name: Package Uni-App local plugin artifact
+        run: |
+          mkdir -p artifact/android
+          cp facecapture/build/outputs/aar/uni-face-capture-release.aar artifact/android/
+          cp uniapp-plugin/package.json artifact/package.json
+          zip -r UniFaceCapture-android-plugin.zip artifact
+      - uses: actions/upload-artifact@v4
+        with:
+          name: UniFaceCapture-android-plugin
+          path: UniFaceCapture-android-plugin.zip
+          retention-days: 30

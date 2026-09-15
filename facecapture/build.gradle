@@ -1,0 +1,31 @@
+plugins {
+    id 'com.android.library'
+}
+
+android {
+    namespace 'io.github.unifacecapture'
+    compileSdk 34
+
+    defaultConfig {
+        minSdk 21
+        consumerProguardFiles 'consumer-rules.pro'
+    }
+
+    buildFeatures {
+        buildConfig false
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+archivesBaseName = 'uni-face-capture'
+
+dependencies {
+    // 从与宿主 HBuilderX 版本一致的 DCloud Android 离线 SDK 中取得。
+    // 只参与编译，不能打入插件 AAR，否则会与 Uni-App 宿主冲突。
+    compileOnly fileTree(include: ['uniapp-v8-release.aar'], dir: 'libs')
+    compileOnly 'com.alibaba:fastjson:1.2.83'
+}
