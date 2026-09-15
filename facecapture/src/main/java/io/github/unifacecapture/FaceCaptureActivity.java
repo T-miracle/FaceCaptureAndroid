@@ -17,6 +17,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.view.Gravity;
+import android.view.ScaleGestureDetector;
 import android.view.Surface;
 import android.view.SurfaceHolder;
 import android.view.View;
@@ -37,7 +38,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 
-/** Full-screen portrait UI that captures the front camera inside a centered square guide. */
+/** Full-screen portrait UI with pinch zoom and switchable rear/front cameras. */
 public final class FaceCaptureActivity extends Activity implements SurfaceHolder.Callback {
     public static final String EXTRA_SESSION_ID = "sessionId";
     public static final String EXTRA_RESULT_CODE = "resultCode";
@@ -56,8 +57,12 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
     private FaceGuideMaskView maskView;
     private FrameLayout guideLayer;
     private View shutterButton;
+    private ImageView switchButton;
+    private TextView zoomHint;
+    private ScaleGestureDetector scaleGestureDetector;
     private Camera camera;
     private int cameraId = -1;
+    private int cameraFacing = Camera.CameraInfo.CAMERA_FACING_BACK;
     private int jpegRotation;
     private String sessionId;
     private boolean surfaceReady;
@@ -98,9 +103,10 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
         root.setBackgroundColor(Color.BLACK);
 
         surfaceView = new AspectRatioSurfaceView(this);
-        surfaceView.setScaleX(-1f);
         surfaceHolder = surfaceView.getHolder();
         surfaceHolder.addCallback(this);
+        scaleGestureDetector = new ScaleGestureDetector(this, new ZoomGestureListener());
+        surfaceView.setOnTouchListener((view, event) -> scaleGestureDetector.onTouchEvent(event));
         root.addView(surfaceView, matchParentParams(Gravity.CENTER));
 
         maskView = new FaceGuideMaskView(this);
@@ -111,8 +117,12 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
         root.addView(createBackButton(), backButtonParams());
         shutterButton = createShutterButton();
         root.addView(shutterButton, new FrameLayout.LayoutParams(dp(76), dp(76)));
+        zoomHint = createZoomHint();
+        root.addView(zoomHint, new FrameLayout.LayoutParams(dp(220), dp(24)));
+        switchButton = createSwitchButton();
+        root.addView(switchButton, new FrameLayout.LayoutParams(dp(52), dp(52)));
         root.addOnLayoutChangeListener((view, left, top, right, bottom,
-            oldLeft, oldTop, oldRight, oldBottom) -> positionGuideAndShutter());
+            oldLeft, oldTop, oldRight, oldBottom) -> positionGuideAndControls());
 
         setContentView(root);
     }
@@ -151,6 +161,26 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
         return outer;
     }
 
+    private TextView createZoomHint() {
+        TextView hint = new TextView(this);
+        hint.setText("双指缩放可调整焦距");
+        hint.setTextColor(0xCCFFFFFF);
+        hint.setTextSize(13);
+        hint.setGravity(Gravity.CENTER);
+        return hint;
+    }
+
+    private ImageView createSwitchButton() {
+        ImageView button = new ImageView(this);
+        button.setImageResource(R.drawable.camera_switch);
+        button.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        button.setPadding(dp(8), dp(8), dp(8), dp(8));
+        button.setContentDescription("切换前后摄像头");
+        button.setBackground(roundDrawable(0x33000000, 0x66FFFFFF, dp(1), dp(26)));
+        button.setOnClickListener(view -> switchCamera());
+        return button;
+    }
+
     private FrameLayout.LayoutParams matchParentParams(int gravity) {
         FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
             FrameLayout.LayoutParams.MATCH_PARENT,
@@ -167,7 +197,7 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
         return params;
     }
 
-    private void positionGuideAndShutter() {
+    private void positionGuideAndControls() {
         RectF frame = maskView.getFrameRect();
         if (frame.isEmpty()) {
             return;
@@ -180,11 +210,25 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
         guideParams.gravity = Gravity.TOP | Gravity.START;
         guideLayer.setLayoutParams(guideParams);
 
+        FrameLayout.LayoutParams hintParams = (FrameLayout.LayoutParams) zoomHint.getLayoutParams();
+        hintParams.setMarginStart(Math.round(frame.centerX() - dp(110)));
+        hintParams.topMargin = Math.round(frame.bottom + dp(16));
+        hintParams.gravity = Gravity.TOP | Gravity.START;
+        zoomHint.setLayoutParams(hintParams);
+
+        int desiredShutterTop = Math.round(frame.bottom + dp(64));
+        int shutterTop = Math.min(desiredShutterTop, Math.max(0, root.getHeight() - dp(88)));
         FrameLayout.LayoutParams shutterParams = (FrameLayout.LayoutParams) shutterButton.getLayoutParams();
         shutterParams.setMarginStart(Math.round(frame.centerX() - dp(38)));
-        shutterParams.topMargin = Math.round(frame.bottom + dp(32));
+        shutterParams.topMargin = shutterTop;
         shutterParams.gravity = Gravity.TOP | Gravity.START;
         shutterButton.setLayoutParams(shutterParams);
+
+        FrameLayout.LayoutParams switchParams = (FrameLayout.LayoutParams) switchButton.getLayoutParams();
+        switchParams.setMarginStart(Math.round(frame.centerX() + dp(64)));
+        switchParams.topMargin = shutterTop + dp(12);
+        switchParams.gravity = Gravity.TOP | Gravity.START;
+        switchButton.setLayoutParams(switchParams);
     }
 
     private GradientDrawable roundDrawable(
@@ -247,17 +291,23 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
             || !surfaceHolder.getSurface().isValid() || !hasCameraPermission()) {
             return;
         }
-        cameraId = findFrontCamera();
+        cameraId = findCamera(cameraFacing);
         if (cameraId < 0) {
-            fail("FRONT_CAMERA_UNAVAILABLE", "设备没有可用的前置相机");
+            cameraFacing = oppositeFacing(cameraFacing);
+            cameraId = findCamera(cameraFacing);
+        }
+        if (cameraId < 0) {
+            fail("CAMERA_UNAVAILABLE", "设备没有可用的摄像头");
             return;
         }
         try {
             camera = Camera.open(cameraId);
+            updatePreviewMirroring();
             configureCamera();
             camera.setPreviewDisplay(surfaceHolder);
             camera.startPreview();
             previewStarted = true;
+            updateControlState();
         } catch (IOException | RuntimeException exception) {
             releaseCamera();
             fail("CAMERA_OPEN_FAILED", "相机启动失败，请重新进入页面");
@@ -269,11 +319,11 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
             || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
     }
 
-    private int findFrontCamera() {
+    private int findCamera(int facing) {
         Camera.CameraInfo info = new Camera.CameraInfo();
         for (int index = 0; index < Camera.getNumberOfCameras(); index++) {
             Camera.getCameraInfo(index, info);
-            if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+            if (info.facing == facing) {
                 return index;
             }
         }
@@ -284,8 +334,14 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
         Camera.CameraInfo info = new Camera.CameraInfo();
         Camera.getCameraInfo(cameraId, info);
         int degrees = displayDegrees();
-        int displayOrientation = (360 - ((info.orientation + degrees) % 360)) % 360;
-        jpegRotation = (info.orientation - degrees + 360) % 360;
+        int displayOrientation;
+        if (info.facing == Camera.CameraInfo.CAMERA_FACING_FRONT) {
+            displayOrientation = (360 - ((info.orientation + degrees) % 360)) % 360;
+            jpegRotation = (info.orientation - degrees + 360) % 360;
+        } else {
+            displayOrientation = (info.orientation - degrees + 360) % 360;
+            jpegRotation = (info.orientation + degrees) % 360;
+        }
         camera.setDisplayOrientation(displayOrientation);
 
         Camera.Parameters parameters = camera.getParameters();
@@ -307,6 +363,64 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
             parameters.setFocusMode(Camera.Parameters.FOCUS_MODE_CONTINUOUS_PICTURE);
         }
         camera.setParameters(parameters);
+    }
+
+    /** Switches between rear and front cameras while keeping the capture UI in place. */
+    private void switchCamera() {
+        if (captureInProgress || camera == null) {
+            return;
+        }
+        int targetFacing = oppositeFacing(cameraFacing);
+        if (findCamera(targetFacing) < 0) {
+            Toast.makeText(this, "设备没有可切换的摄像头", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        cameraFacing = targetFacing;
+        switchButton.setEnabled(false);
+        releaseCamera();
+        openCameraIfReady();
+        switchButton.setEnabled(camera != null);
+        switchButton.setAlpha(camera == null ? 0.5f : 1f);
+    }
+
+    private int oppositeFacing(int facing) {
+        return facing == Camera.CameraInfo.CAMERA_FACING_BACK
+            ? Camera.CameraInfo.CAMERA_FACING_FRONT
+            : Camera.CameraInfo.CAMERA_FACING_BACK;
+    }
+
+    private void updatePreviewMirroring() {
+        surfaceView.setScaleX(cameraFacing == Camera.CameraInfo.CAMERA_FACING_FRONT ? -1f : 1f);
+    }
+
+    /** Applies the closest supported hardware zoom step for a pinch gesture. */
+    private void applyZoom(float scaleFactor) {
+        if (camera == null || captureInProgress) {
+            return;
+        }
+        try {
+            Camera.Parameters parameters = camera.getParameters();
+            if (!parameters.isZoomSupported() || parameters.getMaxZoom() <= 0) {
+                return;
+            }
+            int current = parameters.getZoom();
+            int delta = Math.round((scaleFactor - 1f) * Math.max(4, parameters.getMaxZoom() / 4f));
+            int target = Math.max(0, Math.min(parameters.getMaxZoom(), current + delta));
+            if (target != current) {
+                parameters.setZoom(target);
+                camera.setParameters(parameters);
+            }
+        } catch (RuntimeException ignored) {
+            // Some legacy camera drivers reject zoom changes while refocusing.
+        }
+    }
+
+    private final class ZoomGestureListener extends ScaleGestureDetector.SimpleOnScaleGestureListener {
+        @Override
+        public boolean onScale(ScaleGestureDetector detector) {
+            applyZoom(detector.getScaleFactor());
+            return true;
+        }
     }
 
     private int displayDegrees() {
@@ -367,12 +481,14 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
         captureInProgress = true;
         shutterButton.setEnabled(false);
         shutterButton.setAlpha(0.5f);
+        switchButton.setEnabled(false);
+        switchButton.setAlpha(0.5f);
         try {
             previewStarted = false;
             camera.takePicture(null, null, (data, ignoredCamera) -> processCapturedJpeg(data));
         } catch (RuntimeException exception) {
             captureInProgress = false;
-            updateShutterState();
+            updateControlState();
             Toast.makeText(this, "拍照失败，请重试", Toast.LENGTH_SHORT).show();
             restartPreview();
         }
@@ -391,7 +507,7 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
         } catch (IOException | RuntimeException exception) {
             Toast.makeText(this, "图片处理失败，请重拍", Toast.LENGTH_SHORT).show();
             captureInProgress = false;
-            updateShutterState();
+            updateControlState();
             restartPreview();
         } finally {
             if (cropped != null && cropped != oriented && !cropped.isRecycled()) {
@@ -579,15 +695,19 @@ public final class FaceCaptureActivity extends Activity implements SurfaceHolder
         try {
             camera.startPreview();
             previewStarted = true;
+            updateControlState();
         } catch (RuntimeException exception) {
             releaseCamera();
             openCameraIfReady();
         }
     }
 
-    private void updateShutterState() {
-        shutterButton.setEnabled(!captureInProgress);
-        shutterButton.setAlpha(captureInProgress ? 0.5f : 1f);
+    private void updateControlState() {
+        boolean enabled = camera != null && previewStarted && !captureInProgress;
+        shutterButton.setEnabled(enabled);
+        shutterButton.setAlpha(enabled ? 1f : 0.5f);
+        switchButton.setEnabled(enabled);
+        switchButton.setAlpha(enabled ? 1f : 0.5f);
     }
 
     private void releaseCamera() {
